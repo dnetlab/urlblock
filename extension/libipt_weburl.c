@@ -33,7 +33,7 @@
  * in pre-processor directives below
  */
 #include <iptables.h>  
-#include <linux/netfilter_ipv4/ipt_weburl.h>
+#include <ipt_weburl.h>
 
 #ifdef _XTABLES_H
 	#define iptables_rule_match	xtables_rule_match

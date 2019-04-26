@@ -31,22 +31,24 @@
 #include <net/tcp.h>
 
 #include <linux/netfilter_ipv4/ip_tables.h>
-#include <linux/netfilter_ipv4/ipt_weburl.h>
 
+#include "ipt_weburl.h"
 #include "weburl_deps/regexp.c"
 #include "weburl_deps/tree_map.h"
 
-
 #include <linux/ip.h>
 
-
 #include <linux/netfilter/x_tables.h>
-
-
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Eric Bishop");
 MODULE_DESCRIPTION("Match URL in HTTP(S) requests, designed for use with Gargoyle web interface (www.gargoyle-router.com)");
+
+#if 0
+#define DEBUGP printk
+#else
+#define DEBUGP(format, args...)
+#endif
 
 string_map* compiled_map = NULL;
 
@@ -69,7 +71,6 @@ char *strnistr(const char *s, const char *find, size_t slen)
 {
 	char c, sc;
 	size_t len;
-
 
 	if ((c = *find++) != '\0') 
 	{
@@ -99,18 +100,17 @@ char *strnistr(const char *s, const char *find, size_t slen)
       	return ((char *)s);
 }
 
-
 int do_match_test(unsigned char match_type,  const char* reference, char* query)
 {
 	int matches = 0;
 	struct regexp* r;
+    
 	switch(match_type)
 	{
 		case WEBURL_CONTAINS_TYPE:
 			matches = (strstr(query, reference) != NULL);
 			break;
 		case WEBURL_REGEX_TYPE:
-
 			if(compiled_map == NULL)
 			{
 				compiled_map = initialize_map(0);
@@ -143,8 +143,9 @@ int http_match(const struct ipt_weburl_info* info, const unsigned char* packet_d
 {
 	int test = 0; 
 
-	/* printk("found a http web page request\n"); */
-	char path[625] = "";
+	DEBUGP("found a http web page request\n");
+	
+    char path[625] = "";
 	char host[625] = "";
 	int path_start_index;
 	int path_end_index;
@@ -157,7 +158,7 @@ int http_match(const struct ipt_weburl_info* info, const unsigned char* packet_d
 
 	/* get path portion of URL */
 	path_start_index = (int)(strstr((char*)packet_data, " ") - (char*)packet_data);
-	while( packet_data[path_start_index] == ' ')
+	while(packet_data[path_start_index] == ' ')
 	{
 		path_start_index++;
 	}
@@ -217,7 +218,7 @@ int http_match(const struct ipt_weburl_info* info, const unsigned char* packet_d
 		
 	}
 
-	/* printk("host = \"%s\", path =\"%s\"\n", host, path); */
+	DEBUGP("host = \"%s\", path =\"%s\"\n", host, path);
 	
 
 	switch(info->match_part)
@@ -260,7 +261,7 @@ int http_match(const struct ipt_weburl_info* info, const unsigned char* packet_d
 					test = do_match_test(info->match_type, info->test_str, test_url);
 				}
 				
-				/* printk("test_url = \"%s\", test=%d\n", test_url, test); */
+				DEBUGP("test_url = \"%s\", test=%d\n", test_url, test);
 			}
 			if(!test && strstr(host, "www.") == host)
 			{
@@ -282,7 +283,7 @@ int http_match(const struct ipt_weburl_info* info, const unsigned char* packet_d
 						test = do_match_test(info->match_type, info->test_str, test_url);
 					}
 				
-					/* printk("test_url = \"%s\", test=%d\n", test_url, test); */
+					DEBUGP("test_url = \"%s\", test=%d\n", test_url, test);
 				}
 			}
 			break;
@@ -301,35 +302,36 @@ int http_match(const struct ipt_weburl_info* info, const unsigned char* packet_d
 int https_match(const struct ipt_weburl_info* info, const unsigned char* packet_data, int packet_length)
 {
 	int test = 0;
-
-	/* printk("found a https web page request\n"); */
-	char host[625] = "";
+    char host[625] = "";
 	char* test_prefixes[6];
 	int prefix_index, x, packet_limit;
 	unsigned short cslen, ext_type, ext_len, maxextlen;
 	unsigned char conttype, hndshktype, sidlen, cmplen;
 	unsigned char* packet_ptr;
+	
+    DEBUGP("found a https web page request\n");
 
 	host[0] = '\0';
 	packet_ptr = packet_data;
 
 	if (packet_length < 43)
 	{
-		/*printk("Packet less than 43 bytes, exiting\n");*/
+		/*DEBUGP("Packet less than 43 bytes, exiting\n");*/
 		return test;
 	}
+
 	conttype = packet_data[0];
 	hndshktype = packet_data[5];
 	sidlen = packet_data[43];
-	/*printk("conttype=%d, hndshktype=%d, sidlen=%d ",conttype,hndshktype,sidlen);*/
+	/*DEBUGP("conttype=%d, hndshktype=%d, sidlen=%d ",conttype,hndshktype,sidlen);*/
 	if(conttype != 22)
 	{
-		/*printk("conttype not 22, exiting\n");*/
+		/*DEBUGP("conttype not 22, exiting\n");*/
 		return test;
 	}
 	if(hndshktype != 1)
 	{
-		/*printk("hndshktype not 1, exiting\n");*/
+		/*DEBUGP("hndshktype not 1, exiting\n");*/
 		return test;		//We aren't in a Client Hello
 	}
 
@@ -341,7 +343,7 @@ int https_match(const struct ipt_weburl_info* info, const unsigned char* packet_
 	maxextlen = ntohs(*(unsigned short*)packet_ptr);	//Length of extensions (2 byte)
 	packet_ptr = packet_ptr + 2;	//Skip to beginning of first extension and start looping
 	ext_type = 1;
-	/*printk("cslen=%d, cmplen=%d, maxextlen=%d, pktlen=%d,ptrpos=%d\n",cslen,cmplen,maxextlen,packet_length,packet_ptr - packet_data);*/
+	/*DEBUGP("cslen=%d, cmplen=%d, maxextlen=%d, pktlen=%d,ptrpos=%d\n",cslen,cmplen,maxextlen,packet_length,packet_ptr - packet_data);*/
 	//Limit the pointer bounds to the smaller of either the extensions length or the packet length
 	packet_limit = ((packet_ptr - packet_data) + maxextlen) < packet_length ? ((packet_ptr - packet_data) + maxextlen) : packet_length;
 
@@ -352,18 +354,18 @@ int https_match(const struct ipt_weburl_info* info, const unsigned char* packet_
 		packet_ptr = packet_ptr + 2;
 		ext_len = ntohs(*(unsigned short*)packet_ptr);
 		packet_ptr = packet_ptr + 2;
-		/*printk("ext_type=%d, ext_len=%d\n",ext_type,ext_len);*/
+		/*DEBUGP("ext_type=%d, ext_len=%d\n",ext_type,ext_len);*/
 		if(ext_type == 0)
 		{
 			unsigned short snilen;
-			/*printk("FOUND SNI EXT\n");*/
+			/*DEBUGP("FOUND SNI EXT\n");*/
 			packet_ptr = packet_ptr + 3;	//Skip to length of SNI
 			snilen = ntohs(*(unsigned short*)packet_ptr);
-			/*printk("snilen=%d\n",snilen);*/
+			/*DEBUGP("snilen=%d\n",snilen);*/
 			packet_ptr = packet_ptr + 2;	//Skip to beginning of SNI
 			if((((packet_ptr - packet_data) + snilen) < packet_limit) && (snilen > 0))
 			{
-				/*printk("FOUND SNI\n");*/
+				/*DEBUGP("FOUND SNI\n");*/
 				snilen = snilen < 625 ? snilen : 624; // prevent overflow
 				memcpy(host, packet_ptr, snilen);
 				host[snilen] = '\0';
@@ -371,7 +373,7 @@ int https_match(const struct ipt_weburl_info* info, const unsigned char* packet_
 				{
 					host[x] = (char)tolower(host[x]);
 				}
-				/*printk("sni=%s\n",host);*/
+				/*DEBUGP("sni=%s\n",host);*/
 			}
 		}
 		else
@@ -380,7 +382,7 @@ int https_match(const struct ipt_weburl_info* info, const unsigned char* packet_
 		}
 	}
 
-	/* printk("host = \"%s\"\n", host); */
+	DEBUGP("host = \"%s\"\n", host);
 
 	switch(info->match_part)
 	{
@@ -408,7 +410,7 @@ int https_match(const struct ipt_weburl_info* info, const unsigned char* packet_
 
 				test = do_match_test(info->match_type, info->test_str, test_url);
 
-				/* printk("test_url = \"%s\", test=%d\n", test_url, test); */
+				DEBUGP("test_url = \"%s\", test=%d\n", test_url, test);
 			}
 			if(!test && strstr(host, "www.") == host)
 			{
@@ -422,7 +424,7 @@ int https_match(const struct ipt_weburl_info* info, const unsigned char* packet_
 
 					test = do_match_test(info->match_type, info->test_str, test_url);
 
-					/* printk("test_url = \"%s\", test=%d\n", test_url, test); */
+					DEBUGP("test_url = \"%s\", test=%d\n", test_url, test);
 				}
 			}
 			break;
@@ -436,19 +438,17 @@ int https_match(const struct ipt_weburl_info* info, const unsigned char* packet_
 	return test;
 }
 
-
 static bool match(const struct sk_buff *skb, struct xt_action_param *par)
 {
-
 	const struct ipt_weburl_info *info = (const struct ipt_weburl_info*)(par->matchinfo);
 
-	
 	int test = 0;
 	struct iphdr* iph;	
 
 	/* linearize skb if necessary */
 	struct sk_buff *linear_skb;
 	int skb_copied;
+    
 	if(skb_is_nonlinear(skb))
 	{
 		linear_skb = skb_copy(skb, GFP_ATOMIC);
@@ -460,8 +460,6 @@ static bool match(const struct sk_buff *skb, struct xt_action_param *par)
 		skb_copied = 0;
 	}
 
-	
-
 	/* ignore packets that are not TCP */
 	iph = (struct iphdr*)(skb_network_header(skb));
 	if(iph->protocol == IPPROTO_TCP)
@@ -471,8 +469,6 @@ static bool match(const struct sk_buff *skb, struct xt_action_param *par)
 		unsigned short payload_offset 	= (tcp_hdr->doff*4) + (iph->ihl*4);
 		unsigned char* payload 		= ((unsigned char*)iph) + payload_offset;
 		unsigned short payload_length	= ntohs(iph->tot_len) - payload_offset;
-
-	
 
 		/* if payload length <= 10 bytes don't bother doing a check, otherwise check for match */
 		if(payload_length > 10)
@@ -494,25 +490,22 @@ static bool match(const struct sk_buff *skb, struct xt_action_param *par)
 		kfree_skb(linear_skb);
 	}
 
-
-	/* printk("returning %d from weburl\n\n\n", test); */
+	/* DEBUGP("returning %d from weburl\n\n\n", test); */
 	return test;
 }
-
 
 static int checkentry(const struct xt_mtchk_param *par)
 {
 	return 0;
 }
 
-
 static struct xt_match weburl_match  __read_mostly  = 
 {
 	.name		= "weburl",
-	.match		= match,
+	.match		= &match,
 	.family		= AF_INET,
 	.matchsize	= sizeof(struct ipt_weburl_info),
-	.checkentry	= checkentry,
+	.checkentry	= &checkentry,
 	.me		= THIS_MODULE,
 };
 
@@ -520,7 +513,6 @@ static int __init init(void)
 {
 	compiled_map = NULL;
 	return xt_register_match(&weburl_match);
-
 }
 
 static void __exit fini(void)
